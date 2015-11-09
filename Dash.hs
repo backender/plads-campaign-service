@@ -2,15 +2,7 @@
 
 module Dash (
   MPD (..),
-  Period (..),
-  AdaptationSet(..),
-  Representation(..),
-  SegmentTemplate(..),
-  Periodable(..),
-  defaultVideoFormat,
-  videoProfile2160p,
-  videoProfile1080p,
-  videoProfile720p
+  createPeriod
 ) where
 
 import qualified Data.Text          as T
@@ -22,7 +14,7 @@ import           Text.XML.Generator
 data MPD = MPD {  mpdId                 :: Int
                 , mpdPeriods            :: [Period]
                 , availabilityStartTime :: T.Text
-              }
+               }
 
 data Period = Period { perId           :: Int,
                        perStart        :: T.Text,
@@ -37,7 +29,7 @@ data VideoFormat = VideoFormat { vfMimeType :: T.Text
                                , vfCodecs   :: T.Text
                                }
 
-data Representation = Representation { repVideoProfile :: VideoProfile
+data Representation = Representation { repVideoProfile    :: VideoProfile
                                      , repSegmentTemplate :: SegmentTemplate
                                      }
 
@@ -55,20 +47,12 @@ data SegmentTemplate = SegmentTemplate { stTimescale      :: Int,
                                          stInitialization :: T.Text
                                        }
 
-type PeriodId = Int
-class Periodable a where
-  toPeriod :: a -> PeriodId -> Int -> Period
-
-showT :: (Show s) => s -> T.Text
-showT = T.pack . show
-
-iso8601Duration :: UTC.UTCTime -> T.Text
-iso8601Duration t = T.pack $ "P" ++ formatTime defaultTimeLocale "%s" t
-
+defaultVideoFormat :: VideoFormat
 defaultVideoFormat = VideoFormat { vfMimeType = "video/mp4"
                                  , vfCodecs = "avc1.42c00d"
                                  }
 
+videoProfile2160p :: VideoProfile
 videoProfile2160p = VideoProfile { vpId = "2160p12Mbps"
                                 , vpBandwith = 12000
                                 , vpWidth = 4096
@@ -76,6 +60,7 @@ videoProfile2160p = VideoProfile { vpId = "2160p12Mbps"
                                 , vpFrameRate = 24
                                 }
 
+videoProfile1080p :: VideoProfile
 videoProfile1080p = VideoProfile { vpId = "1080p4800Kbps"
                                 , vpBandwith = 4800
                                 , vpWidth = 1920
@@ -83,12 +68,41 @@ videoProfile1080p = VideoProfile { vpId = "1080p4800Kbps"
                                 , vpFrameRate = 24
                                 }
 
+videoProfile720p :: VideoProfile
 videoProfile720p = VideoProfile { vpId = "720p4800Kbps"
                                 , vpBandwith = 2400
                                 , vpWidth = 1280
                                 , vpHeight = 720
                                 , vpFrameRate = 24
                                 }
+
+
+type PeriodId = Int
+type Iso8601Duration = T.Text
+type SecDuration = Int
+
+iso8601Duration :: UTC.UTCTime -> Iso8601Duration
+iso8601Duration t = T.pack $ "P" ++ formatTime defaultTimeLocale "%s" t
+
+createPeriod :: PeriodId -> Iso8601Duration -> SecDuration -> T.Text -> Period
+createPeriod pid startOffset duration folderName =
+  Period pid startOffset [videoAdaptionSet]
+    where videoAdaptionSet = AdaptationSet defaultVideoFormat [ representation2160p
+                                                              , representation1080p
+                                                              , representation720p ]
+          representation2160p = Representation videoProfile2160p createSegmentTemplate
+          representation1080p = Representation videoProfile1080p createSegmentTemplate
+          representation720p = Representation videoProfile720p createSegmentTemplate
+          createSegmentTemplate = SegmentTemplate
+                                    24000
+                                    duration
+                                    0
+                                    (T.concat [folderName, "/dash/segment_$Number$.m4s"])
+                                    (T.concat [folderName, "/dash/init.mp4"])
+
+
+showT :: (Show s) => s -> T.Text
+showT = T.pack . show
 
 class XmlConvertible t where
   toXml :: t -> Xml Elem
@@ -111,7 +125,6 @@ instance XmlConvertible Period where
               <>  xattr "start" (perStart p)
               <#> map toXml (perAdaptionSets p)
 
-
 instance XmlConvertible AdaptationSet where
   toXml as = xelem "AdaptationSet" $
                  xattr "mimeType" (vfMimeType $ asVideoFormat as)
@@ -132,3 +145,5 @@ instance XmlConvertible SegmentTemplate where
                  xattr "timescale" ((showT . stTimescale) st)
               <> xattr "duration" ((showT . stDuration) st)
               <> xattr "startNumber" ((showT . stStartNumber) st)
+              <> xattr "media" (stMedia st)
+              <> xattr "initialization" (stInitialization st)

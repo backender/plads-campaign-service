@@ -59,7 +59,7 @@ filterNoMpd = filter (isJust . mpd)
 filterCampaignInfos :: [CampaignInfo] -> [CampaignInfo]
 filterCampaignInfos = filterNoMpd  . filterOnlyFirstN
 
-createPeriod :: CampaignInfo -> [Period]
+createPeriod :: CampaignInfo -> Period
 createPeriod ci = []
 
 main :: IO ()
