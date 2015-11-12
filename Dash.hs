@@ -2,7 +2,9 @@
 
 module Dash (
   MPD (..),
-  createPeriod
+  Period (..),
+  createPeriod,
+  toXml
 ) where
 
 import qualified Data.Text          as T
@@ -17,7 +19,7 @@ data MPD = MPD {  mpdId                 :: Int
                }
 
 data Period = Period { perId           :: Int,
-                       perStart        :: T.Text,
+                       perStart        :: Int,
                        perAdaptionSets :: [AdaptationSet]
                      }
 
@@ -81,10 +83,7 @@ type PeriodId = Int
 type Iso8601Duration = T.Text
 type SecDuration = Int
 
-iso8601Duration :: UTC.UTCTime -> Iso8601Duration
-iso8601Duration t = T.pack $ "P" ++ formatTime defaultTimeLocale "%s" t
-
-createPeriod :: PeriodId -> Iso8601Duration -> SecDuration -> T.Text -> Period
+createPeriod :: PeriodId -> SecDuration -> SecDuration -> T.Text -> Period
 createPeriod pid startOffset duration folderName =
   Period pid startOffset [videoAdaptionSet]
     where videoAdaptionSet = AdaptationSet defaultVideoFormat [ representation2160p
@@ -104,6 +103,16 @@ createPeriod pid startOffset duration folderName =
 showT :: (Show s) => s -> T.Text
 showT = T.pack . show
 
+class Iso8601 t where
+  intervalDuration :: t -> Iso8601Duration
+
+instance Iso8601 UTC.UTCTime where
+  intervalDuration t = T.pack $ "P" ++ formatTime defaultTimeLocale "%s" t
+
+instance Iso8601 Int where
+  intervalDuration t = T.pack $ "P" ++ show t
+
+
 class XmlConvertible t where
   toXml :: t -> Xml Elem
 
@@ -122,7 +131,7 @@ instance XmlConvertible MPD where
 instance XmlConvertible Period where
   toXml p = xelem "Period" $
                   xattr "id" ((showT . perId) p)
-              <>  xattr "start" (perStart p)
+              <>  xattr "start" ((intervalDuration . perStart) p)
               <#> map toXml (perAdaptionSets p)
 
 instance XmlConvertible AdaptationSet where
