@@ -3,51 +3,54 @@
 module Dash (
   MPD (..),
   Period (..),
+  createMpd,
   createPeriod,
-  toXml
+  toXml,
+  renderMPD
 ) where
 
+import qualified Data.ByteString.Lazy               as BL
 import qualified Data.Text          as T
 import qualified Data.Time.Clock    as UTC
 import           Data.Time.Format
 import           Text.XML.Generator
 
 
-data MPD = MPD {  mpdId                 :: Int
-                , mpdPeriods            :: [Period]
-                , availabilityStartTime :: T.Text
-               }
+data MPD = MPD { mpdDisplay               :: Int
+               , mpdAvailabilityStartTime :: T.Text
+               , mpdPeriods               :: [Period]
+               } deriving (Show)
 
 data Period = Period { perId           :: Int,
                        perStart        :: Int,
                        perAdaptionSets :: [AdaptationSet]
-                     }
+                     } deriving (Show)
 
 data AdaptationSet = AdaptationSet { asVideoFormat     :: VideoFormat
                                    , asRepresentations :: [Representation]
-                                   }
+                                   } deriving (Show)
 
 data VideoFormat = VideoFormat { vfMimeType :: T.Text
                                , vfCodecs   :: T.Text
-                               }
+                               } deriving (Show)
 
 data Representation = Representation { repVideoProfile    :: VideoProfile
                                      , repSegmentTemplate :: SegmentTemplate
-                                     }
+                                     } deriving (Show)
 
 data VideoProfile = VideoProfile { vpId        :: T.Text,
                                    vpBandwith  :: Int,
                                    vpWidth     :: Int,
                                    vpHeight    :: Int,
                                    vpFrameRate :: Int
-                                 }
+                                 } deriving (Show)
 
 data SegmentTemplate = SegmentTemplate { stTimescale      :: Int,
                                          stDuration       :: Int,
                                          stStartNumber    :: Int,
                                          stMedia          :: T.Text,
                                          stInitialization :: T.Text
-                                       }
+                                       } deriving (Show)
 
 defaultVideoFormat :: VideoFormat
 defaultVideoFormat = VideoFormat { vfMimeType = "video/mp4"
@@ -83,6 +86,9 @@ type PeriodId = Int
 type Iso8601Duration = T.Text
 type SecDuration = Int
 
+createMpd :: Int -> UTC.UTCTime -> [Period] -> MPD
+createMpd display start = MPD display (T.pack $ formatUTC start)
+
 createPeriod :: PeriodId -> SecDuration -> SecDuration -> T.Text -> Period
 createPeriod pid startOffset duration folderName =
   Period pid startOffset [videoAdaptionSet]
@@ -103,14 +109,14 @@ createPeriod pid startOffset duration folderName =
 showT :: (Show s) => s -> T.Text
 showT = T.pack . show
 
+formatUTC :: UTC.UTCTime -> String
+formatUTC = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+
 class Iso8601 t where
   intervalDuration :: t -> Iso8601Duration
 
-instance Iso8601 UTC.UTCTime where
-  intervalDuration t = T.pack $ "P" ++ formatTime defaultTimeLocale "%s" t
-
 instance Iso8601 Int where
-  intervalDuration t = T.pack $ "P" ++ show t
+  intervalDuration t = T.pack $ "P" ++ show t ++ "S"
 
 
 class XmlConvertible t where
@@ -122,11 +128,12 @@ instance XmlConvertible MPD where
               <> xattr "xmlns" "urn:mpeg:dash:schema:mpd:2011"
               <> xattr "xsi:schemaLocation" "urn:mpeg:dash:schema:mpd:2011 http://standards.iso.org/ittf/PubliclyAvailableStandards/MPEG-DASH_schema_files/DASH-MPD.xsd"
               <> xattr "type" "dynamic"
-              <> xattr "availabilityStartTime" (availabilityStartTime m)
+              <> xattr "availabilityStartTime" (mpdAvailabilityStartTime m)
               <> xattr "timeShiftBufferDepth" "PT10M"
               <> xattr "minBufferTime" "PT10S"
               <> xattr "profiles" "urn:mpeg:dash:profile:isoff-live:2011"
               <> xattr "minimumUpdatePeriod" "PT2S"
+              <#> map toXml (mpdPeriods m)
 
 instance XmlConvertible Period where
   toXml p = xelem "Period" $
@@ -156,3 +163,6 @@ instance XmlConvertible SegmentTemplate where
               <> xattr "startNumber" ((showT . stStartNumber) st)
               <> xattr "media" (stMedia st)
               <> xattr "initialization" (stInitialization st)
+
+renderMPD :: MPD -> BL.ByteString
+renderMPD = xrender . toXml

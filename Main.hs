@@ -10,17 +10,23 @@ import           Database.MySQL.Simple.Result
 
 import           Dash
 
-import Text.XML.Generator
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy               as BL
+
+import Control.Arrow
+import Control.Concurrent ( threadDelay )
+import Control.Monad
+
+import qualified Text.Show.Pretty as Pr
+import Criterion.Main
 
 data Display = Display { dId :: Int } deriving (Show)
 
-data CampaignInfo = CampaignInfo { cid     :: Int,
-                                   display :: Int,
-                                   start   :: UTC.UTCTime,
-                                   end     :: UTC.UTCTime,
-                                   src     :: T.Text,
-                                   mpd     :: Maybe T.Text,
+data CampaignInfo = CampaignInfo { cid      :: Int,
+                                   display  :: Int,
+                                   start    :: UTC.UTCTime,
+                                   end      :: UTC.UTCTime,
+                                   src      :: T.Text,
+                                   mpd      :: Maybe T.Text,
                                    duration :: Int
                                  } deriving (Show)
 
@@ -76,26 +82,45 @@ createPeriods' ps (x:xs) = createPeriods' (newPeriod : ps) xs
                                 folderName = src x -- TODO: concept
 
 
-main :: IO ()
-main = do
+getMpds :: IO [MPD]
+getMpds = do
+  now  <- UTC.getCurrentTime
   conn <- connect defaultConnectInfo { connectPassword = "password", connectDatabase = "plads" }
 
   displays <- getDisplays conn
   campaignInfos <- findCampaignInfo conn
-  print $ "number of displays: " ++ show (length displays)
-  print $ "number of campaigninfos: " ++ show (length campaignInfos)
+  --print $ "number of displays: " ++ show (length displays)
+  --print $ "number of campaigninfos: " ++ show (length campaignInfos)
+  let periodsOfDisplays = filter (not . null . fst) $ map ( createPeriods
+                                                            . filterCampaignInfos
+                                                            . filterByDisplay campaignInfos
+                                                            &&&
+                                                            dId ) displays
+
+  --print $ "number of displays with periods: " ++ show (length periodsOfDisplays)
+  let mpds = map (\(periods, display) -> createMpd display now periods) periodsOfDisplays
+  --print $ "number of first display's periods: " ++ show (length $ mpdPeriods $ head mpds)
+  --putStrLn $ Pr.ppShow mpds
+
+  return mpds
 
 
-  let displaysWithPeriods = filter (not . null) (map (createPeriods . filterCampaignInfos . filterByDisplay campaignInfos) displays)
-  print $ "lengths of displays with periods: " ++ show (length displaysWithPeriods)
 
-  let dps = head displaysWithPeriods
-  print $ "lengths of first display's periods: " ++ show (length dps)
+updateStream :: MPD -> IO ()
+updateStream mpd = do
+  print $ mpdDisplay mpd
+  BL.writeFile (show (mpdDisplay mpd) ++ ".xml") (renderMPD mpd)
 
-  let bs = map (xrender . toXml) dps :: [BL.ByteString]
+main :: IO ()
+main = do
+  --defaultMain [ bgroup "mpd xml" [ bench "1x" $ whnfIO xml ] ]
+  forever $ do
+    mpds <- getMpds
+    mapM_ updateStream mpds
+    threadDelay 1000000
 
-  print bs
 
+-- INITIAL CONCEPT:
 -- getCampaigns monitor         -- Monitor -> [Campaign]
 --  . filterCampaign           -- [Campaign] -> [Campaign]
 --    . map createPeriod         -- Campaign -> [Period]
